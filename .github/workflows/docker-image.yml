@@ -1,0 +1,78 @@
+name: Docker Build
+
+on:
+  push:
+    branches: [ "main" ]
+    tags: [ "v*.*.*" ]
+  workflow_dispatch:
+    inputs:
+      modsec_version:
+        description: 'ModSecurity Version'     
+        required: true
+        default: '3.0.11'
+      crs_version:
+        description: 'CRS Version'
+        required: true
+        default: '3.3.4'
+
+env:
+  REGISTRY: docker.io
+  IMAGE_NAME: ${{ github.repository }}
+
+jobs:
+  build:
+    name: Build and Push
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        platform: [linux/amd64, linux/arm64]
+    
+    steps:
+    - name: Checkout Code
+      uses: actions/checkout@v4
+
+    - name: Docker Setup
+      uses: docker/setup-buildx-action@v3
+
+    - name: Cache Docker Layers
+      uses: actions/cache@v3
+      with:
+        path: /tmp/.buildx-cache
+        key: ${{ runner.os }}-buildx-${{ github.sha }}
+        restore-keys: ${{ runner.os }}-buildx-
+
+    - name: Login to Docker Hub
+      uses: docker/login-action@v3
+      with:
+        username: ${{ secrets.DOCKERHUB_USERNAME }}
+        password: ${{ secrets.DOCKERHUB_TOKEN }}
+
+    - name: Build and Push
+      uses: docker/build-push-action@v5
+      with:
+        context: .
+        platforms: ${{ matrix.platform }}
+        build-args: |
+          MODSEC3_VERSION=${{ inputs.modsec_version || '3.0.11' }}
+          CRS_VERSION=${{ inputs.crs_version || '3.3.4' }}
+        cache-from: type=local,src=/tmp/.buildx-cache
+        cache-to: type=local,dest=/tmp/.buildx-cache-new
+        push: ${{ github.event_name == 'push' && startsWith(github.ref, 'refs/tags/') }}
+
+    - name: Update Cache
+      if: always()
+      run: |
+        rm -rf /tmp/.buildx-cache
+        mv /tmp/.buildx-cache-new /tmp/.buildx-cache
+
+  test:
+    name: Smoke Test
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+    - name: Run Container
+      run: |
+        docker run -d --name test-container ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:latest
+        sleep 10
+        docker logs test-container
+        docker exec test-container curl -s http://localhost:8080 | grep "OpenResty"
