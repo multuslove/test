@@ -56,11 +56,12 @@ jobs:
 
     - name: Archive Docker Image
       run: |
-        # 重命名镜像文件包含平台信息
-        mv ./image-*.tar ${{ env.IMAGE_NAME }}-${{ matrix.platform }}.tar
+        # 生成规范化文件名（替换斜杠为下划线）
+        CLEAN_PLATFORM=$(echo "${{ matrix.platform }}" | sed 's/\//_/g')
+        mv ./image-${{ matrix.platform }}.tar ${{ env.IMAGE_NAME }}-$CLEAN_PLATFORM.tar
 
     - name: Upload Artifact
-      uses: actions/upload-artifact@v3
+      uses: actions/upload-artifact@v4  # 注意这里升级到v4版本
       with:
         name: docker-images
         path: ${{ env.IMAGE_NAME }}-*.tar
@@ -79,7 +80,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
     - name: Download Artifact
-      uses: actions/download-artifact@v3
+      uses: actions/download-artifact@v4  # 同步升级到v4
       with:
         name: docker-images
         path: ./artifacts
@@ -88,11 +89,14 @@ jobs:
       run: |
         # 加载所有架构镜像
         for image in ./artifacts/*.tar; do
+          echo "Loading image: $image"
           docker load -i $image
         done
         
         # 测试amd64架构镜像
-        docker run -d --name test-container -p 8080:8080 $(ls ./artifacts | grep amd64 | sed 's/.tar//')
+        TEST_IMAGE=$(ls ./artifacts | grep amd64 | sed 's/.tar//')
+        echo "Testing image: $TEST_IMAGE"
+        docker run -d --name test-container -p 8080:8080 $TEST_IMAGE
         sleep 15
         curl -s http://localhost:8080 | grep -a "OpenResty"
         docker rm -f test-container
