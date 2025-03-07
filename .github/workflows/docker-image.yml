@@ -40,6 +40,13 @@ jobs:
         key: ${{ runner.os }}-buildx-${{ github.sha }}
         restore-keys: ${{ runner.os }}-buildx-
 
+    - name: Preprocess Platform
+      id: platform
+      run: |
+        # 将平台名称中的斜杠转换为下划线
+        CLEAN_PLATFORM=$(echo "${{ matrix.platform }}" | tr '/' '_')
+        echo "clean_platform=$CLEAN_PLATFORM" >> $GITHUB_OUTPUT
+
     - name: Build Docker Image
       uses: docker/build-push-action@v5
       with:
@@ -52,16 +59,17 @@ jobs:
         cache-from: type=local,src=/tmp/.buildx-cache
         cache-to: type=local,dest=/tmp/.buildx-cache-new,mode=max
         push: false
-        outputs: type=docker,dest=./image-${{ matrix.platform }}.tar
+        outputs: type=docker,dest=./image-${{ steps.platform.outputs.clean_platform }}.tar
 
     - name: Archive Docker Image
       run: |
-        # 生成规范化文件名（替换斜杠为下划线）
-        CLEAN_PLATFORM=$(echo "${{ matrix.platform }}" | sed 's/\//_/g')
-        mv ./image-${{ matrix.platform }}.tar ${{ env.IMAGE_NAME }}-$CLEAN_PLATFORM.tar
+        # 验证文件存在性
+        ls -lh ./image-*.tar
+        # 标准化文件名
+        mv ./image-${{ steps.platform.outputs.clean_platform }}.tar ${{ env.IMAGE_NAME }}-${{ steps.platform.outputs.clean_platform }}.tar
 
     - name: Upload Artifact
-      uses: actions/upload-artifact@v4  # 注意这里升级到v4版本
+      uses: actions/upload-artifact@v4
       with:
         name: docker-images
         path: ${{ env.IMAGE_NAME }}-*.tar
@@ -80,7 +88,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
     - name: Download Artifact
-      uses: actions/download-artifact@v4  # 同步升级到v4
+      uses: actions/download-artifact@v4
       with:
         name: docker-images
         path: ./artifacts
@@ -89,12 +97,12 @@ jobs:
       run: |
         # 加载所有架构镜像
         for image in ./artifacts/*.tar; do
-          echo "Loading image: $image"
+          echo "Loading image: $(basename $image)"
           docker load -i $image
         done
         
         # 测试amd64架构镜像
-        TEST_IMAGE=$(ls ./artifacts | grep amd64 | sed 's/.tar//')
+        TEST_IMAGE=$(ls ./artifacts | grep linux_amd64 | sed 's/.tar//')
         echo "Testing image: $TEST_IMAGE"
         docker run -d --name test-container -p 8080:8080 $TEST_IMAGE
         sleep 15
