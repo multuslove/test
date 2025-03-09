@@ -17,7 +17,7 @@ on:
 
 env:
   # 请将 IMAGE_NAME 修改为你的 Docker Hub 仓库地址，例如 "your-dockerhub-user/your-repo"
-  IMAGE_NAME: your-dockerhub-user/your-repo
+  IMAGE_NAME: mulitlove/openresty-modseruicty
 
 jobs:
   build-and-push:
@@ -34,14 +34,13 @@ jobs:
       - name: Log in to Docker Hub
         uses: docker/login-action@v3
         with:
-          username: ${{ secrets.DOCKERHUB_USERNAME }}
-          password: ${{ secrets.DOCKERHUB_TOKEN }}
+          username: mulitlove  # 这里填写你的 Docker Hub 用户名
+          password: dckr_pat_PpXUoCUG2hqLs1r58oVqMQtPE8Y      # 这里填写你的 Docker Hub Token
 
       - name: Build and Push Docker Image
         uses: docker/build-push-action@v5
         with:
           context: .
-          # 如果需要构建多平台镜像，可使用 platforms 参数，如: "linux/amd64,linux/arm64"
           platforms: linux/amd64
           build-args: |
             MODSEC3_VERSION=${{ github.event.inputs.modsec_version || '3.0.11' }}
