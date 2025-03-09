@@ -24,19 +24,22 @@ RUN echo "http://dl-cdn.alpinelinux.org/alpine/v3.18/main" > /etc/apk/repositori
 RUN git clone --depth 1 --branch v${CRS_VERSION} \
     https://github.com/coreruleset/coreruleset.git \
     ${MODSEC_DIR}/crs && \
-    # 重命名配置文件
     mv ${MODSEC_DIR}/crs/crs-setup.conf.example ${MODSEC_DIR}/crs/crs-setup.conf && \
-    # 链接规则文件
     ln -s ${MODSEC_DIR}/crs/rules/ ${MODSEC_DIR}/rules
 
-# 6️⃣ 配置ModSecurity
-COPY modsecurity.conf ${MODSEC_DIR}/modsecurity.conf
-COPY crs.conf ${MODSEC_DIR}/conf/
+# 6️⃣ 配置ModSecurity（自动生成crs.conf）
+RUN echo "Include /etc/nginx/modsecurity.d/crs/crs-setup.conf" > ${MODSEC_DIR}/conf/crs.conf && \
+    echo "Include /etc/nginx/modsecurity.d/crs/rules/*.conf" >> ${MODSEC_DIR}/conf/crs.conf && \
+    echo "SecRuleUpdateTargetById 932130 \"!ARGS:search_query\"" >> ${MODSEC_DIR}/conf/crs.conf && \
+    echo "SecRuleUpdateTargetById 942100 \"!ARGS:json_payload\"" >> ${MODSEC_DIR}/conf/crs.conf
 
-# 7️⃣ 拷贝Nginx配置
+# 7️⃣ 拷贝核心配置文件
+COPY modsecurity.conf ${MODSEC_DIR}/modsecurity.conf
+
+# 8️⃣ 拷贝Nginx配置
 COPY nginx.conf /etc/nginx/nginx.conf
 
-# 8️⃣ 暴露端口
+# 9️⃣ 暴露端口
 EXPOSE 80
 
 CMD ["/usr/local/openresty/bin/openresty", "-g", "daemon off;"]
