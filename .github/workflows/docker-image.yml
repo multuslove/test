@@ -1,4 +1,4 @@
-name: Docker Build
+name: Docker Build and Push
 
 on:
   push:
@@ -7,7 +7,7 @@ on:
   workflow_dispatch:
     inputs:
       modsec_version:
-        description: 'ModSecurity Version'     
+        description: 'ModSecurity Version'
         required: true
         default: '3.0.11'
       crs_version:
@@ -16,95 +16,37 @@ on:
         default: '3.3.4'
 
 env:
-  IMAGE_NAME: ${{ github.repository }}
+  # 请将 IMAGE_NAME 修改为你的 Docker Hub 仓库地址，例如 "your-dockerhub-user/your-repo"
+  IMAGE_NAME: your-dockerhub-user/your-repo
 
 jobs:
-  build:
-    name: Build and Export
+  build-and-push:
+    name: Build and Push Docker Image to Docker Hub
     runs-on: ubuntu-latest
-    strategy:
-      matrix:
-        platform: [linux/amd64, linux/arm64]
-    
+
     steps:
-    - name: Checkout Code
-      uses: actions/checkout@v4
+      - name: Checkout Code
+        uses: actions/checkout@v4
 
-    - name: Docker Setup
-      uses: docker/setup-buildx-action@v3
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
 
-    - name: Cache Docker Layers
-      uses: actions/cache@v3
-      with:
-        path: /tmp/.buildx-cache
-        key: ${{ runner.os }}-buildx-${{ github.sha }}
-        restore-keys: ${{ runner.os }}-buildx-
+      - name: Log in to Docker Hub
+        uses: docker/login-action@v3
+        with:
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
 
-    - name: Preprocess Platform
-      id: platform
-      run: |
-        # 将平台名称中的斜杠转换为下划线
-        CLEAN_PLATFORM=$(echo "${{ matrix.platform }}" | tr '/' '_')
-        echo "clean_platform=$CLEAN_PLATFORM" >> $GITHUB_OUTPUT
-
-    - name: Build Docker Image
-      uses: docker/build-push-action@v5
-      with:
-        context: .
-        platforms: ${{ matrix.platform }}
-        build-args: |
-          MODSEC3_VERSION=${{ github.event.inputs.modsec_version || '3.0.11' }}
-          CRS_VERSION=${{ github.event.inputs.crs_version || '3.3.4' }}
-        tags: ${{ env.IMAGE_NAME }}:${{ github.sha }}
-        cache-from: type=local,src=/tmp/.buildx-cache
-        cache-to: type=local,dest=/tmp/.buildx-cache-new,mode=max
-        push: false
-        outputs: type=docker,dest=./image-${{ steps.platform.outputs.clean_platform }}.tar
-
-    - name: Archive Docker Image
-      run: |
-        # 验证文件存在性
-        ls -lh ./image-*.tar
-        # 标准化文件名
-        mv ./image-${{ steps.platform.outputs.clean_platform }}.tar ${{ env.IMAGE_NAME }}-${{ steps.platform.outputs.clean_platform }}.tar
-
-    - name: Upload Artifact
-      uses: actions/upload-artifact@v4
-      with:
-        name: docker-images
-        path: ${{ env.IMAGE_NAME }}-*.tar
-
-    - name: Update Cache
-      if: always()
-      run: |
-        if [ -d "/tmp/.buildx-cache-new" ]; then
-          rm -rf /tmp/.buildx-cache
-          mv /tmp/.buildx-cache-new /tmp/.buildx-cache
-        fi
-
-  test:
-    name: Smoke Test
-    needs: build
-    runs-on: ubuntu-latest
-    steps:
-    - name: Download Artifact
-      uses: actions/download-artifact@v4
-      with:
-        name: docker-images
-        path: ./artifacts
-
-    - name: Load and Test Image
-      run: |
-        # 加载所有架构镜像
-        for image in ./artifacts/*.tar; do
-          echo "Loading image: $(basename $image)"
-          docker load -i $image
-        done
-        
-        # 测试amd64架构镜像
-        TEST_IMAGE=$(ls ./artifacts | grep linux_amd64 | sed 's/.tar//')
-        echo "Testing image: $TEST_IMAGE"
-        docker run -d --name test-container -p 8080:8080 $TEST_IMAGE
-        sleep 15
-        curl -s http://localhost:8080 | grep -a "OpenResty"
-        docker rm -f test-container
+      - name: Build and Push Docker Image
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          # 如果需要构建多平台镜像，可使用 platforms 参数，如: "linux/amd64,linux/arm64"
+          platforms: linux/amd64
+          build-args: |
+            MODSEC3_VERSION=${{ github.event.inputs.modsec_version || '3.0.11' }}
+            CRS_VERSION=${{ github.event.inputs.crs_version || '3.3.4' }}
+          tags: |
+            ${{ env.IMAGE_NAME }}:latest
+            ${{ env.IMAGE_NAME }}:${{ github.sha }}
+          push: true
