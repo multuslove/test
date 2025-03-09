@@ -1,52 +1,39 @@
-name: Docker Build and Push
+# 1️⃣  基于 Alpine
+FROM alpine:latest
 
-on:
-  push:
-    branches: [ "main" ]
-    tags: [ "v*.*.*" ]
-  workflow_dispatch:
-    inputs:
-      modsec_version:
-        description: 'ModSecurity Version'     
-        required: true
-        default: '3.0.11'
-      crs_version:
-        description: 'CRS Version'
-        required: true
-        default: '3.3.4'
+# 2️⃣  环境变量
+ENV MODSEC_VERSION=3.0.11
+ENV CRS_VERSION=3.3.4
+ENV OPENRESTY_VERSION=1.21.4.1
 
-env:
-  IMAGE_NAME: your-dockerhub-username/your-image-name
+# 3️⃣  安装基本依赖
+RUN apk update && apk add --no-cache \
+    openresty \
+    openresty-resty \
+    openresty-openssl \
+    openresty-pcre \
+    openresty-zlib \
+    libmodsecurity \
+    git \
+    curl \
+    bash \
+    tzdata \
+    && rm -rf /var/cache/apk/*
 
-jobs:
-  build-and-push:
-    name: Build and Push to Docker Hub
-    runs-on: ubuntu-latest
-    
-    steps:
-    - name: Checkout Code
-      uses: actions/checkout@v4
+# 4️⃣  下载 OWASP Core Rule Set (CRS)
+RUN git clone --depth 1 --branch v${CRS_VERSION} https://github.com/coreruleset/coreruleset.git /etc/nginx/modsecurity-crs \
+    && mv /etc/nginx/modsecurity-crs/crs-setup.conf.example /etc/nginx/modsecurity-crs/crs-setup.conf
 
-    - name: Docker Setup
-      uses: docker/setup-buildx-action@v3
+# 5️⃣  下载 OpenResty ModSecurity 模块
+RUN git clone --depth 1 https://github.com/openresty/headers-more-nginx-module.git /tmp/headers-more-nginx-module && \
+    git clone --depth 1 https://github.com/openresty/lua-nginx-module.git /tmp/lua-nginx-module
 
-    - name: Login to Docker Hub
-      uses: docker/login-action@v3
-      with:
-        username: ${{ secrets.DOCKERHUB_USERNAME }}
-        password: ${{ secrets.DOCKERHUB_TOKEN }}
+# 6️⃣  配置 ModSecurity 规则文件
+COPY modsecurity.conf /etc/nginx/modsecurity.conf
+COPY nginx.conf /etc/nginx/nginx.conf
 
-    - name: Build and Push Docker Image
-      uses: docker/build-push-action@v5
-      with:
-        context: .
-        platforms: linux/amd64
-        build-args: |
-          MODSEC3_VERSION=${{ github.event.inputs.modsec_version || '3.0.11' }}
-          CRS_VERSION=${{ github.event.inputs.crs_version || '3.3.4' }}
-        tags: |
-          ${{ env.IMAGE_NAME }}:latest
-          ${{ env.IMAGE_NAME }}:${{ github.sha }}
-        cache-from: type=gha
-        cache-to: type=gha,mode=max
-        push: true
+# 7️⃣  公开端口
+EXPOSE 80
+
+# 8️⃣  启动 OpenResty
+CMD ["/usr/local/openresty/bin/openresty", "-g", "daemon off;"]
