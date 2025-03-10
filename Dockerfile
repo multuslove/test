@@ -79,10 +79,6 @@ COPY modsecurity.conf /etc/modsecurity/modsecurity.conf
 RUN echo "load_module /usr/local/modsecurity/lib/libmodsecurity.so;" \
     > /usr/local/openresty/nginx/conf/modules/modsecurity.conf
 
-# 启动脚本
-COPY docker-entrypoint.sh /docker-entrypoint.sh
-RUN chmod +x /docker-entrypoint.sh
-
 # 环境变量
 ENV MODSEC_RULE_ENGINE=On \
     MODSEC_AUDIT_ENGINE=RelevantOnly \
@@ -91,5 +87,4 @@ ENV MODSEC_RULE_ENGINE=On \
 # 暴露端口
 EXPOSE 80 443
 
-ENTRYPOINT ["/docker-entrypoint.sh"]
 CMD ["openresty", "-g", "daemon off;"]
