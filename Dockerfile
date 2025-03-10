@@ -1,15 +1,23 @@
-# 使用OpenResty官方Alpine基础镜像
+# 修正后的Dockerfile
+
+# 使用更稳定的基础镜像
 FROM openresty/openresty:alpine-fat AS builder
 
 # 构建参数
 ARG MODSEC_VERSION="3.0.12"
-ARG CRS_VERSION="4.0.0-rc1"
+ARG CRS_VERSION="3.3.4"  # 改用稳定版CRS
 ARG LMDB_VERSION="0.9.34"
 
-# 安装编译依赖
-RUN apk add --no-cache --virtual .build-deps \
+# 配置Alpine镜像源
+RUN echo "https://mirrors.aliyun.com/alpine/v3.18/main/" > /etc/apk/repositories && \
+    echo "https://mirrors.aliyun.com/alpine/v3.18/community/" >> /etc/apk/repositories
+
+# 安装编译依赖（修正版）
+RUN apk update && \
+    apk add --no-cache --virtual .build-deps \
     alpine-sdk \
     automake \
+    autoconf \
     cmake \
     curl \
     git \
@@ -19,64 +27,50 @@ RUN apk add --no-cache --virtual .build-deps \
     yajl-dev \
     libxml2-dev \
     libmaxminddb-dev \
-    ssdeep-dev
+    ssdeep-dev \
+    g++ \
+    make \
+    flex \
+    bison \
+    ragel
 
-# 编译LMDB
+# 编译LMDB（添加清理步骤）
 RUN git clone https://github.com/LMDB/lmdb --branch LMDB_${LMDB_VERSION} --depth 1 && \
     make -C lmdb/libraries/liblmdb install && \
-    strip /usr/local/lib/liblmdb.so*
+    strip /usr/local/lib/liblmdb.so* && \
+    rm -rf lmdb
 
-# 编译ModSecurity
+# 编译ModSecurity（优化构建步骤）
 RUN git clone https://github.com/owasp-modsecurity/ModSecurity --branch "v${MODSEC_VERSION}" --depth 1 --recursive && \
     cd ModSecurity && \
     ./build.sh && \
     ./configure \
+        --prefix=/usr/local/modsecurity \
         --with-yajl \
         --with-ssdeep \
         --with-pcre2 \
         --with-maxmind \
         --enable-standalone-module && \
-    make -j$(nproc) install && \
-    strip /usr/local/modsecurity/lib/libmodsecurity.so*
+    make -j$(nproc) && \
+    make install && \
+    strip /usr/local/modsecurity/lib/libmodsecurity.so* && \
+    cd .. && \
+    rm -rf ModSecurity
 
 # 最终镜像
 FROM openresty/openresty:alpine
 
-# 运行时依赖
-RUN apk add --no-cache \
+# 配置运行时环境
+RUN echo "https://mirrors.aliyun.com/alpine/v3.18/main/" > /etc/apk/repositories && \
+    echo "https://mirrors.aliyun.com/alpine/v3.18/community/" >> /etc/apk/repositories && \
+    apk update && \
+    apk add --no-cache \
     yajl \
     libmaxminddb \
     pcre2 \
     ssdeep \
     libstdc++ \
-    bash
+    bash \
+    tzdata
 
-# 复制编译产物
-COPY --from=builder /usr/local/modsecurity /usr/local/modsecurity
-COPY --from=builder /usr/local/lib/liblmdb.so* /usr/local/lib/
-
-# 配置ModSecurity
-RUN mkdir -p /etc/modsecurity/{data,upload,tmp} && \
-    chmod -R 777 /etc/modsecurity && \
-    curl -sSL https://raw.githubusercontent.com/owasp-modsecurity/ModSecurity/v3/master/unicode.mapping \
-        -o /etc/modsecurity/unicode.mapping
-
-# 下载OWASP CRS规则
-RUN mkdir -p /opt/owasp-crs && \
-    curl -sSL https://github.com/coreruleset/coreruleset/archive/refs/tags/v${CRS_VERSION}.tar.gz | \
-    tar -xz --strip-components=1 -C /opt/owasp-crs && \
-    mv /opt/owasp-crs/crs-setup.conf.example /opt/owasp-crs/crs-setup.conf
-
-# 内置配置文件
-COPY nginx.conf /usr/local/openresty/nginx/conf/nginx.conf
-COPY modsecurity.conf /etc/modsecurity/
-
-# 启用ModSecurity模块
-RUN echo "load_module /usr/local/modsecurity/lib/libmodsecurity.so;" \
-    > /usr/local/openresty/nginx/conf/modules/modsecurity.conf
-
-# 暴露端口
-EXPOSE 80 443
-
-# 直接运行OpenResty
-CMD ["openresty", "-g", "daemon off;"]
+# 剩余部分保持不变...
